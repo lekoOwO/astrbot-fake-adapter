@@ -23,9 +23,9 @@ from .fake_platform_event import FakePlatformEvent
 _astrbot_context = None
 
 DEFAULT_PROMPT_TEMPLATE = (
-    "你正在一個有 $user_count 人的群聊中，請以群聊成員的身份發送一條自然的聊天消息。"
-    "要求：1. 消息應當簡短自然，不超過 50 字；"
-    "2. 不要使用自我介紹；"
+    "你正在一個有 $user_count 人的群聊中，請以群聊成員的身份發送一條自然的聊天消息。\n"
+    "要求：1. 消息應當簡短自然，不超過 50 字\n；"
+    "2. 不要使用自我介紹；\n"
     "3. 直接輸出消息內容，不要添加任何前綴或說明。"
 )
 MIN_FREQUENCY_PER_MINUTE = 1.0 / 60.0
@@ -79,6 +79,8 @@ FAKE_ADAPTER_CONFIG_METADATA = {
     "prompt_template": {
         "description": "消息生成 Prompt 模板",
         "type": "text",
+        "editor_mode": True,
+        "editor_language": "markdown",
         "hint": "支持 $user_count 變數。",
     },
 }
