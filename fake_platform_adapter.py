@@ -116,7 +116,12 @@ class FakePlatformAdapter(Platform):
         return normalized
 
     def _make_umo_id(self, session_id: str) -> str:
-        return f"{self.meta().id}:{MessageType.GROUP_MESSAGE}:{session_id}"
+        message_type_value = (
+            MessageType.GROUP_MESSAGE.value
+            if hasattr(MessageType.GROUP_MESSAGE, "value")
+            else str(MessageType.GROUP_MESSAGE)
+        )
+        return f"{self.meta().id}:{message_type_value}:{session_id}"
 
     async def _umo_loop(self, umo: dict) -> None:
         raw_session_id: str = umo.get("id", str(uuid.uuid4()))
