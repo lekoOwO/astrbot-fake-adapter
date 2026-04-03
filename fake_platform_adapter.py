@@ -1,7 +1,18 @@
 import asyncio
+import json
 import random
 import uuid
 from string import Template
+
+from .fake_platform_constants import (
+    DEFAULT_ADAPTER_CONFIG,
+    DEFAULT_PROMPT_TEMPLATE,
+    FAKE_ADAPTER_CONFIG_METADATA,
+    MIN_FREQUENCY_PER_MINUTE,
+    POOL_DEFAULT_BATCH_SIZE,
+    POOL_REFILL_RATIO,
+    merge_adapter_config,
+)
 
 from astrbot.api.platform import (
     AstrBotMessage,
@@ -22,87 +33,11 @@ from .fake_platform_event import FakePlatformEvent
 # Shared reference to AstrBot's Context, set by the main plugin on startup.
 _astrbot_context = None
 
-DEFAULT_PROMPT_TEMPLATE = (
-    "你正在一個有 $user_count 人的群聊中，請以群聊成員的身份發送一條自然的聊天消息。\n"
-    "要求：1. 消息應當簡短自然，不超過 50 字\n；"
-    "2. 不要使用自我介紹；\n"
-    "3. 直接輸出消息內容，不要添加任何前綴或說明。"
-)
-MIN_FREQUENCY_PER_MINUTE = 1.0 / 60.0
-
-FAKE_ADAPTER_CONFIG_METADATA = {
-    "bot_name": {
-        "description": "虛擬機器人名稱",
-        "type": "string",
-        "hint": "作為 fake adapter 的 bot self_id。",
-    },
-    "umos": {
-        "description": "虛擬聊天群組",
-        "type": "template_list",
-        "hint": "可新增多個 UMO；每個 UMO 可配置獨立用戶與發言頻率。",
-        "templates": {
-            "group": {
-                "name": "群聊 UMO",
-                "hint": "一個可持續產生虛擬消息的群聊單位。",
-                "items": {
-                    "id": {
-                        "description": "UMO ID",
-                        "type": "string",
-                        "hint": "例如 fake_group_1。",
-                    },
-                    "users": {
-                        "description": "虛擬用戶 ID 列表",
-                        "type": "list",
-                        "hint": "例如 user_1、user_2。每個 ID 對應一個虛擬發言者。",
-                    },
-                    "frequency": {
-                        "description": "發言頻率（條/分鐘）",
-                        "type": "float",
-                        "hint": "最小為 1/60（每小時 1 條）。",
-                        "slider": {"min": MIN_FREQUENCY_PER_MINUTE, "max": 60, "step": 0.1},
-                    },
-                    "debug_prefix": {
-                        "description": "啟用 Debug 前綴",
-                        "type": "bool",
-                        "hint": "啟用後消息會附加 [來自 {umo_id}] 前綴。",
-                    },
-                },
-            }
-        },
-    },
-    "model": {
-        "description": "LLM 模型提供者",
-        "type": "string",
-        "_special": "select_provider",
-        "hint": "留空時使用 AstrBot 當前預設提供者。",
-    },
-    "prompt_template": {
-        "description": "消息生成 Prompt 模板",
-        "type": "text",
-        "editor_mode": True,
-        "editor_language": "markdown",
-        "hint": "支持 $user_count 變數。",
-    },
-}
-
 
 @register_platform_adapter(
     "fake_adapter",
     "FakeAdapter — 用於插件開發測試的虛擬平台適配器",
-    default_config_tmpl={
-        "bot_name": "FakeBot",
-        "umos": [
-            {
-                "__template_key": "group",
-                "id": "fake_group_1",
-                "users": ["user_1", "user_2"],
-                "frequency": 10,
-                "debug_prefix": True,
-            }
-        ],
-        "model": "",
-        "prompt_template": DEFAULT_PROMPT_TEMPLATE,
-    },
+    default_config_tmpl=DEFAULT_ADAPTER_CONFIG,
     config_metadata=FAKE_ADAPTER_CONFIG_METADATA,
 )
 class FakePlatformAdapter(Platform):
@@ -200,10 +135,36 @@ class FakePlatformAdapter(Platform):
             f"發言頻率 {frequency} 條/分鐘（間隔 {interval:.1f} 秒）"
         )
 
+        batch_size = int(umo.get("batch_size", self.config.get("batch_size", POOL_DEFAULT_BATCH_SIZE)))
+        batch_size = max(1, min(100, batch_size))
+
+        refill_ratio = float(umo.get("refill_ratio", self.config.get("refill_ratio", POOL_REFILL_RATIO)))
+        refill_ratio = max(0.1, min(1.0, refill_ratio))
+
+        message_pool: list[str] = []
+        refill_threshold = max(1, int(batch_size * refill_ratio))
+
         while True:
-            await asyncio.sleep(interval)
             try:
-                await self._emit_fake_message(umo_id, users, debug_prefix)
+                if not message_pool:
+                    message_pool = await self._generate_content_batch(
+                        len(users), batch_size
+                    )
+
+                content = message_pool.pop(0) if message_pool else self._placeholder_message()
+
+                await self._emit_fake_message(
+                    umo_id, users, debug_prefix, content=content
+                )
+
+                if len(message_pool) <= refill_threshold:
+                    more = await self._generate_content_batch(
+                        len(users), batch_size
+                    )
+                    if more:
+                        message_pool.extend(more)
+
+                await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -214,13 +175,18 @@ class FakePlatformAdapter(Platform):
     # ------------------------------------------------------------------
 
     async def _emit_fake_message(
-        self, umo_id: str, users: list[dict], debug_prefix: bool
+        self,
+        umo_id: str,
+        users: list[dict],
+        debug_prefix: bool,
+        content: str | None = None,
     ) -> None:
         user_data = random.choice(users)
         user_id: str = user_data.get("id", str(uuid.uuid4()))
         nickname: str = user_data.get("nickname", user_id)
 
-        content = await self._generate_content(len(users))
+        if content is None:
+            content = await self._generate_content(len(users))
 
         if debug_prefix:
             content = f"[來自 {umo_id}] {content}"
@@ -254,6 +220,12 @@ class FakePlatformAdapter(Platform):
     # ------------------------------------------------------------------
 
     async def _generate_content(self, user_count: int) -> str:
+        results = await self._generate_content_batch(user_count, 1)
+        return results[0] if results else self._placeholder_message()
+
+    async def _generate_content_batch(
+        self, user_count: int, batch_size: int
+    ) -> list[str]:
         prompt_tmpl_str: str = self.config.get(
             "prompt_template", DEFAULT_PROMPT_TEMPLATE
         )
@@ -267,29 +239,52 @@ class FakePlatformAdapter(Platform):
 
         if _astrbot_context is None:
             logger.warning("FakeAdapter: 插件上下文未初始化，使用佔位消息。")
-            return self._placeholder_message()
+            return [self._placeholder_message() for _ in range(batch_size)]
+
+        model_id = str(self.config.get("model", "") or "").strip()
+        provider = None
+
+        if model_id:
+            provider = _astrbot_context.get_provider_by_id(model_id)
+        if provider is None:
+            provider = _astrbot_context.get_using_provider()
+
+        if provider is None:
+            logger.warning("FakeAdapter: 沒有可用的 LLM 提供者，使用佔位消息。")
+            return [self._placeholder_message() for _ in range(batch_size)]
 
         try:
-            model_id: str = self.config.get("model") or ""
-            provider = None
-
-            if model_id:
-                provider = _astrbot_context.get_provider_by_id(model_id)
-            if provider is None:
-                provider = _astrbot_context.get_using_provider()
-
-            if provider is None:
-                logger.warning("FakeAdapter: 沒有可用的 LLM 提供者，使用佔位消息。")
-                return self._placeholder_message()
-
-            provider_id: str = provider.meta().id
             response = await _astrbot_context.llm_generate(
-                chat_provider_id=provider_id,
+                chat_provider_id=provider.meta().id,
                 prompt=prompt,
             )
-            text = (response.completion_text or "").strip()
-            return text if text else self._placeholder_message()
+
+            raw_text = (response.completion_text or "").strip()
+            if not raw_text:
+                return [self._placeholder_message() for _ in range(batch_size)]
+
+            candidates = []
+            try:
+                parsed = json.loads(raw_text)
+                if isinstance(parsed, list):
+                    candidates = [str(item).strip() for item in parsed if isinstance(item, str) and item.strip()]
+            except json.JSONDecodeError:
+                candidates = []
+
+            if not candidates:
+                candidates = [line.strip() for line in raw_text.splitlines() if line.strip()]
+
+            if not candidates:
+                return [self._placeholder_message() for _ in range(batch_size)]
+
+            if len(candidates) < batch_size:
+                logger.info(
+                    f"FakeAdapter: LLM 返回 {len(candidates)} 條，少於要求 {batch_size} 條，將補充佔位消息。"
+                )
+                candidates.extend([self._placeholder_message()] * (batch_size - len(candidates)))
+
+            return candidates[:batch_size]
 
         except Exception as exc:
             logger.error(f"FakeAdapter: LLM 生成消息失敗: {exc}")
-            return self._placeholder_message()
+            return [self._placeholder_message() for _ in range(batch_size)]
