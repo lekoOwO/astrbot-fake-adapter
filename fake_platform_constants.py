@@ -1,6 +1,6 @@
 DEFAULT_PROMPT_TEMPLATE = (
-    "你正在一個有 $user_count 人的群聊中，請以群聊成員身份生成多條自然聊天消息。\n"
-    "請直接輸出合法 JSON 列表，例如 [\"消息1\", \"消息2\", ...]，不要額外說明。\n"
+    "你正在一個有 $user_count 人的群聊中，請以群聊成員身份生成 $batch_size 條自然聊天消息。\n"
+    '請直接輸出合法 JSON 列表，例如 ["消息1", "消息2", ...]，不要額外說明。\n'
     "每條消息不超過 50 字，保持簡短自然。"
 )
 MIN_FREQUENCY_PER_MINUTE = 1.0 / 60.0
@@ -8,11 +8,6 @@ POOL_DEFAULT_BATCH_SIZE = 20
 POOL_REFILL_RATIO = 0.3
 
 FAKE_ADAPTER_CONFIG_METADATA = {
-    "bot_name": {
-        "description": "虛擬機器人名稱",
-        "type": "string",
-        "hint": "作為 fake adapter 的 bot self_id。",
-    },
     "umos": {
         "description": "虛擬聊天群組",
         "type": "template_list",
@@ -36,7 +31,11 @@ FAKE_ADAPTER_CONFIG_METADATA = {
                         "description": "發言頻率（條/分鐘）",
                         "type": "float",
                         "hint": "最小為 1/60（每小時 1 條）。",
-                        "slider": {"min": MIN_FREQUENCY_PER_MINUTE, "max": 60, "step": 0.1},
+                        "slider": {
+                            "min": MIN_FREQUENCY_PER_MINUTE,
+                            "max": 60,
+                            "step": 0.1,
+                        },
                     },
                     "debug_prefix": {
                         "description": "啟用 Debug 前綴",
@@ -73,12 +72,11 @@ FAKE_ADAPTER_CONFIG_METADATA = {
         "type": "text",
         "editor_mode": True,
         "editor_language": "markdown",
-        "hint": "支持 $user_count 變數，建議是要求 JSON 列表形式，如 [\"msg1\", \"msg2\"].",
+        "hint": '支持 $user_count 和 $batch_size 變數，建議是要求 JSON 列表形式，如 ["msg1", "msg2"].',
     },
 }
 
 DEFAULT_ADAPTER_CONFIG = {
-    "bot_name": "FakeBot",
     "umos": [
         {
             "__template_key": "group",
@@ -95,7 +93,9 @@ DEFAULT_ADAPTER_CONFIG = {
 }
 
 
-def merge_adapter_config(base_config: dict | None, override_config: dict | None) -> dict:
+def merge_adapter_config(
+    base_config: dict | None, override_config: dict | None
+) -> dict:
     """將 override 應用到 base，返回新的字典。"""
     config = dict(DEFAULT_ADAPTER_CONFIG if base_config is None else base_config)
     if override_config:

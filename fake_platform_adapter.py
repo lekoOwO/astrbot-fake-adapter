@@ -11,7 +11,6 @@ from .fake_platform_constants import (
     MIN_FREQUENCY_PER_MINUTE,
     POOL_DEFAULT_BATCH_SIZE,
     POOL_REFILL_RATIO,
-    merge_adapter_config,
 )
 
 from astrbot.api.platform import (
@@ -135,10 +134,16 @@ class FakePlatformAdapter(Platform):
             f"發言頻率 {frequency} 條/分鐘（間隔 {interval:.1f} 秒）"
         )
 
-        batch_size = int(umo.get("batch_size", self.config.get("batch_size", POOL_DEFAULT_BATCH_SIZE)))
+        batch_size = int(
+            umo.get(
+                "batch_size", self.config.get("batch_size", POOL_DEFAULT_BATCH_SIZE)
+            )
+        )
         batch_size = max(1, min(100, batch_size))
 
-        refill_ratio = float(umo.get("refill_ratio", self.config.get("refill_ratio", POOL_REFILL_RATIO)))
+        refill_ratio = float(
+            umo.get("refill_ratio", self.config.get("refill_ratio", POOL_REFILL_RATIO))
+        )
         refill_ratio = max(0.1, min(1.0, refill_ratio))
 
         message_pool: list[str] = []
@@ -151,16 +156,16 @@ class FakePlatformAdapter(Platform):
                         len(users), batch_size
                     )
 
-                content = message_pool.pop(0) if message_pool else self._placeholder_message()
+                content = (
+                    message_pool.pop(0) if message_pool else self._placeholder_message()
+                )
 
                 await self._emit_fake_message(
                     umo_id, users, debug_prefix, content=content
                 )
 
                 if len(message_pool) <= refill_threshold:
-                    more = await self._generate_content_batch(
-                        len(users), batch_size
-                    )
+                    more = await self._generate_content_batch(len(users), batch_size)
                     if more:
                         message_pool.extend(more)
 
@@ -193,7 +198,8 @@ class FakePlatformAdapter(Platform):
 
         abm = AstrBotMessage()
         abm.type = MessageType.GROUP_MESSAGE
-        abm.self_id = self.config.get("bot_name", "FakeBot")
+        # fake adapter 不支援真正“發言帳號”，將 self_id 設為固定適配器標識
+        abm.self_id = self.meta().id
         abm.session_id = umo_id
         abm.message_id = str(uuid.uuid4())
         abm.sender = MessageMember(user_id=user_id, nickname=nickname)
@@ -230,11 +236,15 @@ class FakePlatformAdapter(Platform):
             "prompt_template", DEFAULT_PROMPT_TEMPLATE
         )
         try:
-            prompt = Template(prompt_tmpl_str).safe_substitute(user_count=user_count)
+            prompt = Template(prompt_tmpl_str).safe_substitute(
+                user_count=user_count,
+                batch_size=batch_size,
+            )
         except Exception as exc:
             logger.warning(f"FakeAdapter: Prompt 模板解析失敗，使用預設模板: {exc}")
             prompt = Template(DEFAULT_PROMPT_TEMPLATE).safe_substitute(
-                user_count=user_count
+                user_count=user_count,
+                batch_size=batch_size,
             )
 
         if _astrbot_context is None:
@@ -267,12 +277,18 @@ class FakePlatformAdapter(Platform):
             try:
                 parsed = json.loads(raw_text)
                 if isinstance(parsed, list):
-                    candidates = [str(item).strip() for item in parsed if isinstance(item, str) and item.strip()]
+                    candidates = [
+                        str(item).strip()
+                        for item in parsed
+                        if isinstance(item, str) and item.strip()
+                    ]
             except json.JSONDecodeError:
                 candidates = []
 
             if not candidates:
-                candidates = [line.strip() for line in raw_text.splitlines() if line.strip()]
+                candidates = [
+                    line.strip() for line in raw_text.splitlines() if line.strip()
+                ]
 
             if not candidates:
                 return [self._placeholder_message() for _ in range(batch_size)]
@@ -281,7 +297,9 @@ class FakePlatformAdapter(Platform):
                 logger.info(
                     f"FakeAdapter: LLM 返回 {len(candidates)} 條，少於要求 {batch_size} 條，將補充佔位消息。"
                 )
-                candidates.extend([self._placeholder_message()] * (batch_size - len(candidates)))
+                candidates.extend(
+                    [self._placeholder_message() for _ in range(batch_size - len(candidates))]
+                )
 
             return candidates[:batch_size]
 
