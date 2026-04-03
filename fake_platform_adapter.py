@@ -28,6 +28,7 @@ DEFAULT_PROMPT_TEMPLATE = (
     "2. 不要使用自我介紹；"
     "3. 直接輸出消息內容，不要添加任何前綴或說明。"
 )
+MIN_FREQUENCY_PER_MINUTE = 1.0 / 60.0
 
 FAKE_ADAPTER_CONFIG_METADATA = {
     "bot_name": {
@@ -58,7 +59,7 @@ FAKE_ADAPTER_CONFIG_METADATA = {
                         "description": "發言頻率（條/分鐘）",
                         "type": "float",
                         "hint": "最小為 1/60（每小時 1 條）。",
-                        "slider": {"min": 0.0167, "max": 60, "step": 0.1},
+                        "slider": {"min": MIN_FREQUENCY_PER_MINUTE, "max": 60, "step": 0.1},
                     },
                     "debug_prefix": {
                         "description": "啟用 Debug 前綴",
@@ -166,7 +167,8 @@ class FakePlatformAdapter(Platform):
                 user_id = str(user.get("id", "")).strip()
                 if not user_id:
                     continue
-                nickname = str(user.get("nickname", "")).strip() or user_id
+                nickname = str(user.get("nickname", "")).strip()
+                nickname = nickname if nickname else user_id
                 normalized.append({"id": user_id, "nickname": nickname})
                 continue
 
@@ -187,8 +189,8 @@ class FakePlatformAdapter(Platform):
             logger.warning(f"FakeAdapter: UMO '{umo_id}' 沒有配置任何用戶，跳過。")
             return
 
-        # Clamp frequency to a sensible minimum (1 message per hour = 1/60 per minute)
-        frequency = max(frequency, 1.0 / 60.0)
+        # Clamp frequency to a sensible minimum (1 message per hour).
+        frequency = max(frequency, MIN_FREQUENCY_PER_MINUTE)
         interval = 60.0 / frequency
         logger.info(
             f"FakeAdapter: UMO '{umo_id}' 啟動，"
