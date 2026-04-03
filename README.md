@@ -26,14 +26,13 @@ bot_name: FakeBot           # 虛擬機器人名稱
 
 umos:                        # 虛擬聊天群組列表
   - id: fake_group_1         # UMO ID（必填）
-    users:                   # 虛擬用戶列表
-      - id: user_1           # 用戶 ID（必填）
-        nickname: Alice      # 暱稱（可選，預設為用戶 ID）
-      - id: user_2           # 未填 nickname，預設使用 user_id
+    users:                   # 虛擬用戶 ID 列表
+      - user_1
+      - user_2
     frequency: 10            # 發言頻率（條/分鐘，可選，預設 10）
     debug_prefix: true       # 是否添加 [來自 {umo_id}] 前綴（可選，預設 true）
 
-model: ""                    # LLM Provider ID（留空使用預設 Provider）
+model: ""                    # 從 WebUI 下拉選擇 Provider（留空使用預設 Provider）
 prompt_template: "..."       # 消息生成 Prompt 模板（支援 $user_count 佔位符）
 ```
 

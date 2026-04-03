@@ -28,6 +28,60 @@ DEFAULT_PROMPT_TEMPLATE = (
     "2. 不要使用自我介紹；"
     "3. 直接輸出消息內容，不要添加任何前綴或說明。"
 )
+MIN_FREQUENCY_PER_MINUTE = 1.0 / 60.0
+
+FAKE_ADAPTER_CONFIG_METADATA = {
+    "bot_name": {
+        "description": "虛擬機器人名稱",
+        "type": "string",
+        "hint": "作為 fake adapter 的 bot self_id。",
+    },
+    "umos": {
+        "description": "虛擬聊天群組",
+        "type": "template_list",
+        "hint": "可新增多個 UMO；每個 UMO 可配置獨立用戶與發言頻率。",
+        "templates": {
+            "group": {
+                "name": "群聊 UMO",
+                "hint": "一個可持續產生虛擬消息的群聊單位。",
+                "items": {
+                    "id": {
+                        "description": "UMO ID",
+                        "type": "string",
+                        "hint": "例如 fake_group_1。",
+                    },
+                    "users": {
+                        "description": "虛擬用戶 ID 列表",
+                        "type": "list",
+                        "hint": "例如 user_1、user_2。每個 ID 對應一個虛擬發言者。",
+                    },
+                    "frequency": {
+                        "description": "發言頻率（條/分鐘）",
+                        "type": "float",
+                        "hint": "最小為 1/60（每小時 1 條）。",
+                        "slider": {"min": MIN_FREQUENCY_PER_MINUTE, "max": 60, "step": 0.1},
+                    },
+                    "debug_prefix": {
+                        "description": "啟用 Debug 前綴",
+                        "type": "bool",
+                        "hint": "啟用後消息會附加 [來自 {umo_id}] 前綴。",
+                    },
+                },
+            }
+        },
+    },
+    "model": {
+        "description": "LLM 模型提供者",
+        "type": "string",
+        "_special": "select_provider",
+        "hint": "留空時使用 AstrBot 當前預設提供者。",
+    },
+    "prompt_template": {
+        "description": "消息生成 Prompt 模板",
+        "type": "text",
+        "hint": "支持 $user_count 變數。",
+    },
+}
 
 
 @register_platform_adapter(
@@ -37,11 +91,9 @@ DEFAULT_PROMPT_TEMPLATE = (
         "bot_name": "FakeBot",
         "umos": [
             {
+                "__template_key": "group",
                 "id": "fake_group_1",
-                "users": [
-                    {"id": "user_1", "nickname": "Alice"},
-                    {"id": "user_2"},
-                ],
+                "users": ["user_1", "user_2"],
                 "frequency": 10,
                 "debug_prefix": True,
             }
@@ -49,6 +101,7 @@ DEFAULT_PROMPT_TEMPLATE = (
         "model": "",
         "prompt_template": DEFAULT_PROMPT_TEMPLATE,
     },
+    config_metadata=FAKE_ADAPTER_CONFIG_METADATA,
 )
 class FakePlatformAdapter(Platform):
     def __init__(
@@ -106,9 +159,29 @@ class FakePlatformAdapter(Platform):
     def _placeholder_message() -> str:
         return f"（虛擬消息 #{random.randint(1000, 9999)}）"
 
+    @staticmethod
+    def _normalize_users(users: list) -> list[dict]:
+        normalized: list[dict] = []
+        for user in users:
+            if isinstance(user, dict):
+                user_id = str(user.get("id", "")).strip()
+                if not user_id:
+                    continue
+                nickname = str(user.get("nickname", "")).strip()
+                nickname = nickname if nickname else user_id
+                normalized.append({"id": user_id, "nickname": nickname})
+                continue
+
+            user_id = str(user).strip()
+            if not user_id:
+                continue
+            normalized.append({"id": user_id, "nickname": user_id})
+
+        return normalized
+
     async def _umo_loop(self, umo: dict) -> None:
         umo_id: str = umo.get("id", str(uuid.uuid4()))
-        users: list[dict] = umo.get("users", [])
+        users: list[dict] = self._normalize_users(umo.get("users", []))
         frequency: float = float(umo.get("frequency", 10))
         debug_prefix: bool = bool(umo.get("debug_prefix", True))
 
@@ -116,8 +189,8 @@ class FakePlatformAdapter(Platform):
             logger.warning(f"FakeAdapter: UMO '{umo_id}' 沒有配置任何用戶，跳過。")
             return
 
-        # Clamp frequency to a sensible minimum (1 message per hour = 1/60 per minute)
-        frequency = max(frequency, 1.0 / 60.0)
+        # Clamp frequency to a sensible minimum (1 message per hour).
+        frequency = max(frequency, MIN_FREQUENCY_PER_MINUTE)
         interval = 60.0 / frequency
         logger.info(
             f"FakeAdapter: UMO '{umo_id}' 啟動，"
