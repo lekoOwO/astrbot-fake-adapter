@@ -115,8 +115,14 @@ class FakePlatformAdapter(Platform):
 
         return normalized
 
+    def _make_umo_id(self, session_id: str) -> str:
+        return f"{self.meta().id}:{MessageType.GROUP_MESSAGE}:{session_id}"
+
     async def _umo_loop(self, umo: dict) -> None:
-        umo_id: str = umo.get("id", str(uuid.uuid4()))
+        raw_session_id: str = umo.get("id", str(uuid.uuid4()))
+        session_id: str = raw_session_id
+        group_id: str = raw_session_id
+        umo_id: str = self._make_umo_id(session_id)
         users: list[dict] = self._normalize_users(umo.get("users", []))
         frequency: float = float(umo.get("frequency", 10))
         debug_prefix: bool = bool(umo.get("debug_prefix", True))
@@ -160,8 +166,13 @@ class FakePlatformAdapter(Platform):
                     message_pool.pop(0) if message_pool else self._placeholder_message()
                 )
 
+                logger.debug(
+                    f"FakeAdapter: UMO元数据 session={session_id} group={group_id} umo={umo_id} "
+                    f"pool={len(message_pool)} content={content[:40]}"
+                )
+
                 await self._emit_fake_message(
-                    umo_id, users, debug_prefix, content=content
+                    session_id, group_id, umo_id, users, debug_prefix, content=content
                 )
 
                 if len(message_pool) <= refill_threshold:
@@ -181,6 +192,8 @@ class FakePlatformAdapter(Platform):
 
     async def _emit_fake_message(
         self,
+        session_id: str,
+        group_id: str,
         umo_id: str,
         users: list[dict],
         debug_prefix: bool,
@@ -198,12 +211,11 @@ class FakePlatformAdapter(Platform):
 
         abm = AstrBotMessage()
         abm.type = MessageType.GROUP_MESSAGE
-        # fake adapter 不支援真正“發言帳號”，將 self_id 設為固定適配器標識
         abm.self_id = self.meta().id
-        abm.session_id = umo_id
+        abm.session_id = session_id
+        abm.group = Group(group_id=group_id, group_name=group_id)
         abm.message_id = str(uuid.uuid4())
         abm.sender = MessageMember(user_id=user_id, nickname=nickname)
-        abm.group = Group(group_id=umo_id, group_name=umo_id)
         abm.message = [Plain(text=content)]
         abm.message_str = content
         abm.raw_message = {
@@ -298,7 +310,10 @@ class FakePlatformAdapter(Platform):
                     f"FakeAdapter: LLM 返回 {len(candidates)} 條，少於要求 {batch_size} 條，將補充佔位消息。"
                 )
                 candidates.extend(
-                    [self._placeholder_message() for _ in range(batch_size - len(candidates))]
+                    [
+                        self._placeholder_message()
+                        for _ in range(batch_size - len(candidates))
+                    ]
                 )
 
             return candidates[:batch_size]

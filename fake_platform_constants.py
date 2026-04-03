@@ -11,21 +11,21 @@ FAKE_ADAPTER_CONFIG_METADATA = {
     "umos": {
         "description": "虛擬聊天群組",
         "type": "template_list",
-        "hint": "可新增多個 UMO；每個 UMO 可配置獨立用戶與發言頻率。",
+        "hint": "可新增多個群組；每個群組可配置獨立成員與發言頻率。",
         "templates": {
             "group": {
                 "name": "群聊 UMO",
-                "hint": "一個可持續產生虛擬消息的群聊單位。",
+                "hint": "一個可持續產生虛擬消息的群組單位。",
                 "items": {
                     "id": {
-                        "description": "UMO ID",
+                        "description": "群組 ID",
                         "type": "string",
                         "hint": "例如 fake_group_1。",
                     },
                     "users": {
                         "description": "虛擬用戶 ID 列表",
                         "type": "list",
-                        "hint": "例如 user_1、user_2。每個 ID 對應一個虛擬發言者。",
+                        "hint": "例如 user_1、user_2。每個 ID 對應一個群聊成員。",
                     },
                     "frequency": {
                         "description": "發言頻率（條/分鐘）",
